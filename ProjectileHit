@@ -1,0 +1,114 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public enum ProjectileHitType
+{
+    Penetration,
+    NoPenetration,
+    Ricochet,
+    ModulePenetration,
+    ModuleNoPenetration,
+    Environment
+}
+
+public class ProjectileHitResult
+{
+    public ProjectileHitType type;
+    public float damage;
+    public Vector3 point;
+}
+
+[RequireComponent(typeof(Projectile))]
+public class ProjectileHit : MonoBehaviour
+{
+    private const float RAY_ADVANCE = 1.1f;
+
+    private bool isHit;
+    private RaycastHit raycastHit;
+    private Armor hitArmor;
+
+    public bool IsHit => isHit;
+    public RaycastHit RaycastHit => raycastHit;
+    public Armor HitArmor => hitArmor;
+
+    private Projectile projectile;
+
+    private void Awake()
+    {
+        projectile = GetComponent<Projectile>();
+    }
+
+    public void Check()
+    {
+        if (isHit == true) return;
+
+        // Raycast hit effect
+        if (Physics.Raycast(transform.position, transform.forward, out raycastHit, projectile.Properties.Velocity * Time.deltaTime * RAY_ADVANCE))
+        {
+            Armor armor = raycastHit.collider.GetComponent<Armor>();
+
+            if (armor != null)
+            {
+                hitArmor = armor;
+            }
+
+            isHit = true;
+        }
+    }
+
+    public ProjectileHitResult GetHitResult()
+    {
+        ProjectileHitResult hitResult = new ProjectileHitResult();
+
+        if (hitArmor == null)
+        {
+            hitResult.type = ProjectileHitType.Environment;
+            hitResult.point = raycastHit.point;
+            return hitResult;
+        }
+
+        float normalization = projectile.Properties.NormalizationAngle;
+
+        if (projectile.Properties.Caliber > hitArmor.Thickness * 2)
+        {
+            normalization = (projectile.Properties.NormalizationAngle * 1.4f * projectile.Properties.Caliber) / hitArmor.Thickness;
+        }
+
+        float angle = Mathf.Abs(Vector3.SignedAngle(-projectile.transform.forward, raycastHit.normal, projectile.transform.right)) - normalization;
+        float reducedArmor = hitArmor.Thickness / Mathf.Cos(angle * Mathf.Deg2Rad);
+        float projectilePenetation = projectile.Properties.GetSpreadArmorPenetration();
+
+        // Visual angles
+        Debug.DrawRay(raycastHit.point, -projectile.transform.forward, Color.red);
+        Debug.DrawRay(raycastHit.point, raycastHit.normal, Color.green);
+        Debug.DrawRay(raycastHit.point, -projectile.transform.right, Color.yellow);
+
+        if (angle > projectile.Properties.RicochetAngle && projectile.Properties.Caliber < hitArmor.Thickness * 3 && hitArmor.Type == ArmorType.Vehicle)
+            hitResult.type = ProjectileHitType.Ricochet;
+        else if (projectilePenetation >= reducedArmor)
+            hitResult.type = ProjectileHitType.Penetration;
+        else if (projectilePenetation < reducedArmor)
+            hitResult.type = ProjectileHitType.NoPenetration;
+
+        Debug.Log($"armor: {hitArmor.Thickness}, resucedArmor {reducedArmor}, angle: {angle}, norm: {normalization}, penetation: {projectilePenetation}, type: {hitResult.type}");
+
+        if (hitResult.type == ProjectileHitType.Penetration)
+            hitResult.damage = projectile.Properties.GetSpreadDamage();
+        else
+            hitResult.damage = 0;
+
+        if (hitArmor.Type == ArmorType.Module)
+        {
+            if (hitResult.type == ProjectileHitType.Penetration)
+                hitResult.type = ProjectileHitType.ModulePenetration;
+
+            if (hitResult.type == ProjectileHitType.NoPenetration)
+                hitResult.type = ProjectileHitType.ModuleNoPenetration;
+        }
+
+        hitResult.point = raycastHit.point;
+
+        return hitResult;
+    }
+}
